@@ -1,4 +1,4 @@
--- Let's Go Golfing!
+-- Let's Go Golfing! (Self-Calibrating 2D Version)
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -7,18 +7,27 @@ local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local UI = loadstring(game:HttpGet("https://gitlab.com/scar17off/scarhack/-/raw/main/libraries/ui-library.lua"))()
-local Window = UI.CreateWindow()
-local MainCategory = Window:CreateCategory("ScarHack")
-
+-- Configuration
 local Config = {
     Prediction = true,
     MaxPower = false,
     BallControl = false,
     ControlSpeed = 1,
     TeleportEnabled = false,
+    PredictionBias = 0.7275,
+    AutoCalibrated = false,
+    VelocityMult = 1.0,
 }
 
+-- Load UI Library Safely
+local UI, Window, MainCategory
+pcall(function()
+    UI = loadstring(game:HttpGet("https://gitlab.com/scar17off/scarhack/-/raw/main/libraries/ui-library.lua"))()
+    Window = UI.CreateWindow()
+    MainCategory = Window:CreateCategory("ScarHack")
+end)
+
+-- Physics Tuning UI
 local gravityGui = Instance.new("ScreenGui")
 gravityGui.Name = "GravitySliderUI"
 gravityGui.ResetOnSpawn = false
@@ -27,7 +36,7 @@ gravityGui.DisplayOrder = 999999
 gravityGui.Parent = PlayerGui
 
 local gravFrame = Instance.new("Frame")
-gravFrame.Size = UDim2.new(0, 380, 0, 160)
+gravFrame.Size = UDim2.new(0, 380, 0, 240)
 gravFrame.Position = UDim2.new(0.5, -190, 0.3, 0)
 gravFrame.BackgroundColor3 = Color3.fromRGB(90, 0, 140)
 gravFrame.BorderSizePixel = 6
@@ -39,7 +48,7 @@ gravFrame.Parent = gravityGui
 local title = Instance.new("TextLabel")
 title.Size = UDim2.new(1,0,0,40)
 title.BackgroundTransparency = 1
-title.Text = "Gravity Control"
+title.Text = "Physics Tuning"
 title.TextColor3 = Color3.fromRGB(200, 200, 200)
 title.Font = Enum.Font.SourceSansBold
 title.TextScaled = true
@@ -47,7 +56,7 @@ title.Parent = gravFrame
 
 local sliderFrame = Instance.new("Frame")
 sliderFrame.Size = UDim2.new(0.9,0,0,35)
-sliderFrame.Position = UDim2.new(0.05,0,0.45,0)
+sliderFrame.Position = UDim2.new(0.05,0,0.25,0)
 sliderFrame.BackgroundColor3 = Color3.fromRGB(50,50,50)
 sliderFrame.BorderSizePixel = 4
 sliderFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -60,8 +69,8 @@ fill.BorderSizePixel = 0
 fill.Parent = sliderFrame
 
 local valueText = Instance.new("TextLabel")
-valueText.Size = UDim2.new(0.95,0,0,35)
-valueText.Position = UDim2.new(0.5, 0, 0.73, 0)
+valueText.Size = UDim2.new(0.95,0,0,30)
+valueText.Position = UDim2.new(0.5, 0, 0.42, 0)
 valueText.AnchorPoint = Vector2.new(0.5, 0)
 valueText.BackgroundTransparency = 1
 valueText.Text = "Gravity: "..math.floor(workspace.Gravity)
@@ -70,7 +79,34 @@ valueText.Font = Enum.Font.SourceSansBold
 valueText.TextScaled = true
 valueText.Parent = gravFrame
 
-local dragging = false
+local biasFrame = Instance.new("Frame")
+biasFrame.Size = UDim2.new(0.9,0,0,35)
+biasFrame.Position = UDim2.new(0.05,0,0.6,0)
+biasFrame.BackgroundColor3 = Color3.fromRGB(50,50,50)
+biasFrame.BorderSizePixel = 4
+biasFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+biasFrame.Parent = gravFrame
+
+local biasFill = Instance.new("Frame")
+biasFill.Size = UDim2.new((Config.PredictionBias - 0.5), 0, 1, 0)
+biasFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+biasFill.BorderSizePixel = 0
+biasFill.Parent = biasFrame
+
+local biasText = Instance.new("TextLabel")
+biasText.Size = UDim2.new(0.95,0,0,30)
+biasText.Position = UDim2.new(0.5, 0, 0.77, 0)
+biasText.AnchorPoint = Vector2.new(0.5, 0)
+biasText.BackgroundTransparency = 1
+biasText.Text = "Prediction Dist: 72.75% (Perfect)"
+biasText.TextColor3 = Color3.fromRGB(200, 200, 200)
+biasText.Font = Enum.Font.SourceSansBold
+biasText.TextScaled = true
+biasText.Parent = gravFrame
+
+local draggingGrav = false
+local draggingBias = false
+
 local function updateGravity(x)
     local percent = math.clamp((x - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
     local grav = math.floor(percent * 200)
@@ -79,48 +115,37 @@ local function updateGravity(x)
     valueText.Text = "Gravity: " .. grav
 end
 
-sliderFrame.InputBegan:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-        dragging = true
-        gravFrame.Draggable = false
-        updateGravity(inp.Position.X)
-    end
-end)
+local function updateBias(x)
+    local percent = math.clamp((x - biasFrame.AbsolutePosition.X) / biasFrame.AbsoluteSize.X, 0, 1)
+    Config.PredictionBias = 0.5 + percent
+    biasFill.Size = UDim2.new(percent, 0, 1, 0)
+    biasText.Text = "Prediction Dist: " .. math.floor(Config.PredictionBias * 10000)/100 .. "%"
+end
+
+sliderFrame.InputBegan:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then draggingGrav = true; gravFrame.Draggable = false; updateGravity(inp.Position.X) end end)
+biasFrame.InputBegan:Connect(function(inp) if inp.UserInputType == Enum.UserInputType.MouseButton1 then draggingBias = true; gravFrame.Draggable = false; updateBias(inp.Position.X) end end)
 
 UserInputService.InputChanged:Connect(function(inp)
-    if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-        updateGravity(inp.Position.X)
+    if inp.UserInputType == Enum.UserInputType.MouseMovement then
+        if draggingGrav then updateGravity(inp.Position.X) end
+        if draggingBias then updateBias(inp.Position.X) end
     end
 end)
 
 UserInputService.InputEnded:Connect(function(inp)
-    if inp.UserInputType == Enum.UserInputType.MouseButton1 then 
-        dragging = false
-        gravFrame.Draggable = true
-    end
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then draggingGrav = false; draggingBias = false; gravFrame.Draggable = true end
 end)
 
-MainCategory:CreateToggle({ text = "Trajectory Prediction", default = true, callback = function(s) Config.Prediction = s end })
-MainCategory:CreateToggle({ text = "Max Power Always", default = false, callback = function(s) Config.MaxPower = s end })
-MainCategory:CreateToggle({ text = "Ball Control (Arrows)", default = false, callback = function(s) Config.BallControl = s end })
-
-MainCategory:CreateToggle({
-    text = "Instant Teleport To Hole",
-    default = false,
-    callback = function(s) Config.TeleportEnabled = s end
-})
-
-MainCategory:CreateButton({
-    text = "Open Gravity Menu",
-    callback = function()
-        gravityGui.Enabled = not gravityGui.Enabled
-    end
-})
+if MainCategory then
+    MainCategory:CreateToggle({ text = "Trajectory Prediction", default = true, callback = function(s) Config.Prediction = s end })
+    MainCategory:CreateToggle({ text = "Max Power Always", default = false, callback = function(s) Config.MaxPower = s end })
+    MainCategory:CreateToggle({ text = "Ball Control (Arrows)", default = false, callback = function(s) Config.BallControl = s end })
+    MainCategory:CreateToggle({ text = "Instant Teleport To Hole", default = false, callback = function(s) Config.TeleportEnabled = s end })
+    MainCategory:CreateButton({ text = "Open Tuning Menu", callback = function() gravityGui.Enabled = not gravityGui.Enabled end })
+end
 
 local DataModule
-pcall(function()
-    DataModule = require(LocalPlayer.PlayerScripts.ClientEngine.GameplayModule.DataModule)
-end)
+pcall(function() DataModule = require(LocalPlayer.PlayerScripts.ClientEngine.GameplayModule.DataModule) end)
 
 local PredictionFolder = workspace:FindFirstChild("Sharpness_Trajectory") or Instance.new("Folder")
 PredictionFolder.Name = "Sharpness_Trajectory"
@@ -132,7 +157,7 @@ for i = 1, MAX_DOTS do
     local dot = PredictionFolder:FindFirstChild("Dot"..i) or Instance.new("Part")
     dot.Name = "Dot"..i
     dot.Shape = Enum.PartType.Ball
-    dot.Size = Vector3.new(0.12, 0.12, 0.12)
+    dot.Size = Vector3.new(0.15, 0.15, 0.15)
     dot.Transparency = 1
     dot.Color = Color3.fromRGB(255, 170, 0)
     dot.Anchored = true
@@ -144,15 +169,20 @@ for i = 1, MAX_DOTS do
 end
 
 local function GetVelocity(power, angle, putting)
-    local v4 = math.floor(power + 0.5)
-    local v52 = math.floor(angle + 0.5)
+    local v4 = (power or 0)
+    local v52 = (angle or 0)
+    local rawVel
     if putting then
-        return Vector3.new(math.cos(math.rad(v52)) * (v4 * 0.45 + 5), 0, 0)
+        rawVel = Vector3.new(math.cos(math.rad(v52)) * (v4 * 0.45 + 5), 0, 0)
     else
         local v72 = math.clamp((v4 * 31.35) ^ 0.5714285714285714 + 3, 10, math.huge)
-        return Vector3.new(math.cos(math.rad(v52)) * v72, -math.sin(math.rad(v52)) * v72, 0)
+        rawVel = Vector3.new(math.cos(math.rad(v52)) * v72, math.sin(math.rad(v52)) * v72, 0)
     end
+    -- Apply the learned multiplier
+    return rawVel * Config.VelocityMult
 end
+
+local lastShotData = nil -- Track power/angle when shot was made
 
 local function UpdateTrajectory()
     if not DataModule or not Config.Prediction or Config.BallControl then
@@ -167,16 +197,43 @@ local function UpdateTrajectory()
         return
     end
 
-    local isAiming = holeData.BallInRest and not holeData.WaitingForServer and holeData.HoleActive
+    -- Robust Aiming Detection
+    local isAiming = true
+    pcall(function()
+        if holeData.HoleActive == false or holeData.WaitingForServer == true or holeData.BallInRest == false then isAiming = false end
+    end)
+    
+    -- Calibration logic: Catch the shot launch
+    local ball = globalData.Ball
+    if not isAiming and not Config.AutoCalibrated then
+        local currentVel = ball.AssemblyLinearVelocity
+        if currentVel.Magnitude > 1 and lastShotData then
+            -- Compare actual velocity with expected velocity
+            local expected = GetVelocity(lastShotData.Power, lastShotData.Angle, lastShotData.Putting)
+            if expected.Magnitude > 0 then
+                Config.VelocityMult = currentVel.Magnitude / expected.Magnitude
+                Config.AutoCalibrated = true
+                print("Sharpness Calibrated: Multiplier set to " .. Config.VelocityMult)
+            end
+        end
+    end
+
     if not isAiming then
         for i = 1, MAX_DOTS do dots[i].Transparency = 1 end
         return
     end
 
-    local startPos = globalData.Ball.Position
-    local vel = GetVelocity(holeData.CurrentPower, holeData.CurrentAngle, holeData.Putting)
-    local currentPos = startPos
-    local currentVel = vel
+    -- Store shot data for calibration
+    lastShotData = { Power = holeData.CurrentPower, Angle = holeData.CurrentAngle, Putting = holeData.Putting }
+
+    local startPos = Vector3.new(0,0,0)
+    pcall(function()
+        local b = ball:IsA("Model") and ball.PrimaryPart or ball
+        startPos = b.Position
+    end)
+    local currentPos = Vector3.new(startPos.X, startPos.Y, 0) -- Lock to 2D plane (Z=0)
+
+    local currentVel = GetVelocity(holeData.CurrentPower, holeData.CurrentAngle, holeData.Putting)
     local dt = 1/60
     local GRAVITY = Vector3.new(0, -workspace.Gravity, 0)
     local rayParams = RaycastParams.new()
@@ -184,137 +241,100 @@ local function UpdateTrajectory()
     rayParams.FilterDescendantsInstances = {workspace.Balls, workspace.Characters, PredictionFolder}
 
     local bounceCount = 0
-    local maxBounces = 5
+    local maxBounces = 20
     local stopIdx = MAX_DOTS
+    local bias = Config.PredictionBias or 0.7275
 
     for i = 1, MAX_DOTS do
-        dots[i].Position = currentPos
-        dots[i].Transparency = 0.3
-        dots[i].Color = holeData.Putting and Color3.fromRGB(0, 255, 127) or Color3.fromRGB(255, 170, 0)
+        local dot = dots[i]
+        local success = pcall(function()
+            dot.Position = currentPos
+            dot.Transparency = 0.3
+            dot.Color = holeData.Putting and Color3.fromRGB(0, 255, 127) or Color3.fromRGB(255, 170, 0)
 
-        local stepVel = currentVel * dt + 0.5 * GRAVITY * dt * dt
-        local result = workspace:Raycast(currentPos, stepVel, rayParams)
+            local stepVel = currentVel * dt + 0.5 * GRAVITY * dt * dt
+            -- Raycast with Z=0 strictly
+            local result = workspace:Raycast(currentPos, Vector3.new(stepVel.X, stepVel.Y, 0), rayParams)
 
-        if result then
-            local hitPart = result.Instance
-            local hitName = hitPart.Name
-            if hitName == "End" or hitName == "Sand" or hitName == "Water" or hitName == "OutOfBounds" then
-                if hitName ~= "End" then dots[i].Color = Color3.fromRGB(255, 0, 0) end
-                stopIdx = i
-                break
-            end
-            if bounceCount < maxBounces then
-                bounceCount += 1
-                local normal = result.Normal
+            if result then
+                local hitPart = result.Instance
+                local hitName = hitPart.Name
                 
-                -- Get dynamic physical properties for 100% accuracy
-                local hitProps = hitPart.CurrentPhysicalProperties
-                if not hitProps then pcall(function() hitProps = PhysicalProperties.new(hitPart.Material) end) end
-                
-                local ball = globalData.Ball
-                local ballProps = ball.CurrentPhysicalProperties
-                if not ballProps then pcall(function() ballProps = PhysicalProperties.new(ball.Material) end) end
-                
-                local restitution = 0.5
-                local friction = 0.3
-                
-                if hitProps and ballProps then
-                    local ew = hitProps.ElasticityWeight + ballProps.ElasticityWeight
-                    local fw = hitProps.FrictionWeight + ballProps.FrictionWeight
-                    
-                    restitution = (ew > 0) and (hitProps.Elasticity * hitProps.ElasticityWeight + ballProps.Elasticity * ballProps.ElasticityWeight) / ew or (hitProps.Elasticity + ballProps.Elasticity) / 2
-                    friction = (fw > 0) and (hitProps.Friction * hitProps.FrictionWeight + ballProps.Friction * ballProps.FrictionWeight) / fw or (hitProps.Friction + ballProps.Friction) / 2
-                elseif hitProps then
-                    restitution = hitProps.Elasticity
-                    friction = hitProps.Friction
+                local inHazard = (hitName == "Sand" or hitName == "Water" or hitName == "OutOfBounds")
+                if hitName == "End" or inHazard then
+                    if inHazard then dot.Color = Color3.fromRGB(255, 0, 0) end
+                    stopIdx = i
+                    error("stop")
                 end
 
-                -- Account for moving platforms
-                local hitVelocity = hitPart.AssemblyLinearVelocity
-                local relativeVel = currentVel - hitVelocity
-                local vn = relativeVel:Dot(normal) * normal
-                local vt = relativeVel - vn
-                
-                currentVel = hitVelocity + vt * (1 - friction) - vn * restitution
-                currentVel = Vector3.new(currentVel.X, currentVel.Y, 0)
-                currentPos = result.Position + normal * 0.02
+                if bounceCount < maxBounces then
+                    bounceCount = bounceCount + 1
+                    local normal = result.Normal
+                    normal = Vector3.new(normal.X, normal.Y, 0).Unit -- Keep 2D
+                    
+                    local restitution = 0.6 * (0.8 + bias * 0.2)
+                    local vn = currentVel:Dot(normal) * normal
+                    local vt = currentVel - vn
+                    
+                    currentVel = vt * (0.8 * bias) - vn * restitution
+                    currentVel = Vector3.new(currentVel.X, currentVel.Y, 0)
+                    
+                    currentPos = result.Position + normal * 0.1
+                    currentPos = Vector3.new(currentPos.X, currentPos.Y, 0)
+                else
+                    stopIdx = i
+                    error("stop")
+                end
             else
-                stopIdx = i
-                break
+                currentPos = currentPos + stepVel
+                currentPos = Vector3.new(currentPos.X, currentPos.Y, 0)
+                currentVel = currentVel + GRAVITY * dt
             end
-        else
-            currentPos += stepVel
-            currentVel += GRAVITY * dt
-        end
+            
+            if currentVel.Magnitude < 0.01 then
+                stopIdx = i
+                error("stop")
+            end
+        end)
+        if not success then break end
     end
 
-    for i = stopIdx + 1, MAX_DOTS do
-        dots[i].Transparency = 1
-    end
+    for i = stopIdx + 1, MAX_DOTS do dots[i].Transparency = 1 end
 end
 
 RunService.Heartbeat:Connect(function()
-    if not DataModule then return end
-
-    local globalData = DataModule.GlobalData
-    local holeData = DataModule.CurrentHoleData
-    local ball = globalData and globalData.Ball
-
-    if Config.MaxPower and holeData then
-        if holeData.BallInRest and holeData.HoleActive and holeData.CurrentPower and holeData.CurrentPower > 0 then
-            holeData.CurrentPower = 100
+    pcall(function()
+        if not DataModule then return end
+        local globalData = DataModule.GlobalData
+        local holeData = DataModule.CurrentHoleData
+        local ball = globalData and globalData.Ball
+        if Config.MaxPower and holeData and (holeData.CurrentPower or 0) > 0 then holeData.CurrentPower = 100 end
+        if Config.BallControl and ball then
+            workspace.CurrentCamera.CameraSubject = ball
+            ball.AssemblyLinearVelocity = Vector3.new(0,0,0)
+            ball.Anchored = false
+            local moveDir = Vector3.new()
+            if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then moveDir += Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then moveDir += Vector3.new(0,-1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then moveDir += Vector3.new(-1,0,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.Right) then moveDir += Vector3.new(1,0,0) end
+            if moveDir.Magnitude > 0 then ball.CFrame = ball.CFrame + (moveDir.Unit * Config.ControlSpeed) end
+            ball.CFrame = CFrame.new(ball.Position.X, ball.Position.Y, 0)
         end
-    end
-
-    if Config.BallControl and ball then
-        workspace.CurrentCamera.CameraSubject = ball
-        ball.AssemblyLinearVelocity = Vector3.new(0,0,0)
-        ball.AssemblyAngularVelocity = Vector3.new(0,0,0)
-        ball.Anchored = false
-
-        local moveDir = Vector3.new()
-        if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then moveDir += Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then moveDir += Vector3.new(0,-1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then moveDir += Vector3.new(-1,0,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Right) then moveDir += Vector3.new(1,0,0) end
-
-        if moveDir.Magnitude > 0 then
-            ball.CFrame = ball.CFrame + (moveDir.Unit * Config.ControlSpeed)
-        end
-        ball.CFrame = CFrame.new(ball.Position.X, ball.Position.Y, 0)
-    end
-
-    if Config.TeleportEnabled and ball then
-        local LoadedMap = workspace:FindFirstChild("LoadedMap")
-        if LoadedMap then
-            local Map = LoadedMap:FindFirstChildOfClass("Folder")
-            if Map then
-                local mainTiles = Map:FindFirstChild("Main Tiles")
-                if mainTiles then
-                    local holeFolder = mainTiles:FindFirstChild("Hole")
-                    if holeFolder then
-                        local holePart = holeFolder:FindFirstChild("Hole")
-                        if holePart then
-                            pcall(function()
-                                local target = holePart.CFrame
-                                if ball:IsA("Model") and ball.PrimaryPart then
-                                    ball:SetPrimaryPartCFrame(target)
-                                elseif ball:IsA("BasePart") then
-                                    ball.CFrame = target
-                                end
-                            end)
-                        end
-                    end
-                end
+        if Config.TeleportEnabled and ball then
+            local LoadedMap = workspace:FindFirstChild("LoadedMap")
+            local Map = LoadedMap and LoadedMap:FindFirstChildOfClass("Folder")
+            local holePart = Map and Map:FindFirstChild("Hole", true)
+            if holePart then
+                pcall(function()
+                    if ball:IsA("Model") then ball:SetPrimaryPartCFrame(holePart.CFrame) else ball.CFrame = holePart.CFrame end
+                end)
             end
+            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+            task.wait()
+            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
         end
-
-        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
-        task.wait()
-        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
-    end
+    end)
 end)
 
-RunService.RenderStepped:Connect(function()
-    pcall(UpdateTrajectory)
-end)
+RunService.RenderStepped:Connect(function() pcall(UpdateTrajectory) end)
