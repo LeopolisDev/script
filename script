@@ -178,7 +178,7 @@ local function UpdateTrajectory()
     local currentPos = startPos
     local currentVel = vel
     local dt = 1/60
-    local GRAVITY = Vector3.new(0, -80, 0)
+    local GRAVITY = Vector3.new(0, -workspace.Gravity, 0)
     local rayParams = RaycastParams.new()
     rayParams.FilterType = Enum.RaycastFilterType.Exclude
     rayParams.FilterDescendantsInstances = {workspace.Balls, workspace.Characters, PredictionFolder}
@@ -196,7 +196,8 @@ local function UpdateTrajectory()
         local result = workspace:Raycast(currentPos, stepVel, rayParams)
 
         if result then
-            local hitName = result.Instance.Name
+            local hitPart = result.Instance
+            local hitName = hitPart.Name
             if hitName == "End" or hitName == "Sand" or hitName == "Water" or hitName == "OutOfBounds" then
                 if hitName ~= "End" then dots[i].Color = Color3.fromRGB(255, 0, 0) end
                 stopIdx = i
@@ -205,10 +206,36 @@ local function UpdateTrajectory()
             if bounceCount < maxBounces then
                 bounceCount += 1
                 local normal = result.Normal
-                local restitution = (hitName == "Green") and 0.316 or 0.58
-                local vn = currentVel:Dot(normal) * normal
-                local vt = currentVel - vn
-                currentVel = vt * 0.7 - vn * restitution
+                
+                -- Get dynamic physical properties for 100% accuracy
+                local hitProps = hitPart.CurrentPhysicalProperties
+                if not hitProps then pcall(function() hitProps = PhysicalProperties.new(hitPart.Material) end) end
+                
+                local ball = globalData.Ball
+                local ballProps = ball.CurrentPhysicalProperties
+                if not ballProps then pcall(function() ballProps = PhysicalProperties.new(ball.Material) end) end
+                
+                local restitution = 0.5
+                local friction = 0.3
+                
+                if hitProps and ballProps then
+                    local ew = hitProps.ElasticityWeight + ballProps.ElasticityWeight
+                    local fw = hitProps.FrictionWeight + ballProps.FrictionWeight
+                    
+                    restitution = (ew > 0) and (hitProps.Elasticity * hitProps.ElasticityWeight + ballProps.Elasticity * ballProps.ElasticityWeight) / ew or (hitProps.Elasticity + ballProps.Elasticity) / 2
+                    friction = (fw > 0) and (hitProps.Friction * hitProps.FrictionWeight + ballProps.Friction * ballProps.FrictionWeight) / fw or (hitProps.Friction + ballProps.Friction) / 2
+                elseif hitProps then
+                    restitution = hitProps.Elasticity
+                    friction = hitProps.Friction
+                end
+
+                -- Account for moving platforms
+                local hitVelocity = hitPart.AssemblyLinearVelocity
+                local relativeVel = currentVel - hitVelocity
+                local vn = relativeVel:Dot(normal) * normal
+                local vt = relativeVel - vn
+                
+                currentVel = hitVelocity + vt * (1 - friction) - vn * restitution
                 currentVel = Vector3.new(currentVel.X, currentVel.Y, 0)
                 currentPos = result.Position + normal * 0.02
             else
