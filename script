@@ -1,0 +1,293 @@
+-- Let's Go Golfing!
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local VirtualInputManager = game:GetService("VirtualInputManager")
+
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local UI = loadstring(game:HttpGet("https://gitlab.com/scar17off/scarhack/-/raw/main/libraries/ui-library.lua"))()
+local Window = UI.CreateWindow()
+local MainCategory = Window:CreateCategory("ScarHack")
+
+local Config = {
+    Prediction = true,
+    MaxPower = false,
+    BallControl = false,
+    ControlSpeed = 1,
+    TeleportEnabled = false,
+}
+
+local gravityGui = Instance.new("ScreenGui")
+gravityGui.Name = "GravitySliderUI"
+gravityGui.ResetOnSpawn = false
+gravityGui.Enabled = false
+gravityGui.DisplayOrder = 999999
+gravityGui.Parent = PlayerGui
+
+local gravFrame = Instance.new("Frame")
+gravFrame.Size = UDim2.new(0, 380, 0, 160)
+gravFrame.Position = UDim2.new(0.5, -190, 0.3, 0)
+gravFrame.BackgroundColor3 = Color3.fromRGB(90, 0, 140)
+gravFrame.BorderSizePixel = 6
+gravFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+gravFrame.Active = true
+gravFrame.Draggable = true
+gravFrame.Parent = gravityGui
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1,0,0,40)
+title.BackgroundTransparency = 1
+title.Text = "Gravity Control"
+title.TextColor3 = Color3.fromRGB(200, 200, 200)
+title.Font = Enum.Font.SourceSansBold
+title.TextScaled = true
+title.Parent = gravFrame
+
+local sliderFrame = Instance.new("Frame")
+sliderFrame.Size = UDim2.new(0.9,0,0,35)
+sliderFrame.Position = UDim2.new(0.05,0,0.45,0)
+sliderFrame.BackgroundColor3 = Color3.fromRGB(50,50,50)
+sliderFrame.BorderSizePixel = 4
+sliderFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+sliderFrame.Parent = gravFrame
+
+local fill = Instance.new("Frame")
+fill.Size = UDim2.new(workspace.Gravity/200, 0, 1, 0)
+fill.BackgroundColor3 = Color3.fromRGB(180, 0, 255)
+fill.BorderSizePixel = 0
+fill.Parent = sliderFrame
+
+local valueText = Instance.new("TextLabel")
+valueText.Size = UDim2.new(0.95,0,0,35)
+valueText.Position = UDim2.new(0.5, 0, 0.73, 0)
+valueText.AnchorPoint = Vector2.new(0.5, 0)
+valueText.BackgroundTransparency = 1
+valueText.Text = "Gravity: "..math.floor(workspace.Gravity)
+valueText.TextColor3 = Color3.fromRGB(200, 200, 200)
+valueText.Font = Enum.Font.SourceSansBold
+valueText.TextScaled = true
+valueText.Parent = gravFrame
+
+local dragging = false
+local function updateGravity(x)
+    local percent = math.clamp((x - sliderFrame.AbsolutePosition.X) / sliderFrame.AbsoluteSize.X, 0, 1)
+    local grav = math.floor(percent * 200)
+    workspace.Gravity = grav
+    fill.Size = UDim2.new(percent, 0, 1, 0)
+    valueText.Text = "Gravity: " .. grav
+end
+
+sliderFrame.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+        dragging = true
+        gravFrame.Draggable = false
+        updateGravity(inp.Position.X)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(inp)
+    if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+        updateGravity(inp.Position.X)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1 then 
+        dragging = false
+        gravFrame.Draggable = true
+    end
+end)
+
+MainCategory:CreateToggle({ text = "Trajectory Prediction", default = true, callback = function(s) Config.Prediction = s end })
+MainCategory:CreateToggle({ text = "Max Power Always", default = false, callback = function(s) Config.MaxPower = s end })
+MainCategory:CreateToggle({ text = "Ball Control (Arrows)", default = false, callback = function(s) Config.BallControl = s end })
+
+MainCategory:CreateToggle({
+    text = "Instant Teleport To Hole",
+    default = false,
+    callback = function(s) Config.TeleportEnabled = s end
+})
+
+MainCategory:CreateButton({
+    text = "Open Gravity Menu",
+    callback = function()
+        gravityGui.Enabled = not gravityGui.Enabled
+    end
+})
+
+local DataModule
+pcall(function()
+    DataModule = require(LocalPlayer.PlayerScripts.ClientEngine.GameplayModule.DataModule)
+end)
+
+local PredictionFolder = workspace:FindFirstChild("Sharpness_Trajectory") or Instance.new("Folder")
+PredictionFolder.Name = "Sharpness_Trajectory"
+PredictionFolder.Parent = workspace
+
+local dots = {}
+local MAX_DOTS = 300
+for i = 1, MAX_DOTS do
+    local dot = PredictionFolder:FindFirstChild("Dot"..i) or Instance.new("Part")
+    dot.Name = "Dot"..i
+    dot.Shape = Enum.PartType.Ball
+    dot.Size = Vector3.new(0.12, 0.12, 0.12)
+    dot.Transparency = 1
+    dot.Color = Color3.fromRGB(255, 170, 0)
+    dot.Anchored = true
+    dot.CanCollide = false
+    dot.CanTouch = false
+    dot.CanQuery = false
+    dot.Parent = PredictionFolder
+    dots[i] = dot
+end
+
+local function GetVelocity(power, angle, putting)
+    local v4 = math.floor(power + 0.5)
+    local v52 = math.floor(angle + 0.5)
+    if putting then
+        return Vector3.new(math.cos(math.rad(v52)) * (v4 * 0.45 + 5), 0, 0)
+    else
+        local v72 = math.clamp((v4 * 31.35) ^ 0.5714285714285714 + 3, 10, math.huge)
+        return Vector3.new(math.cos(math.rad(v52)) * v72, -math.sin(math.rad(v52)) * v72, 0)
+    end
+end
+
+local function UpdateTrajectory()
+    if not DataModule or not Config.Prediction or Config.BallControl then
+        for i = 1, MAX_DOTS do dots[i].Transparency = 1 end
+        return
+    end
+
+    local holeData = DataModule.CurrentHoleData
+    local globalData = DataModule.GlobalData
+    if not holeData or not globalData or not globalData.Ball then
+        for i = 1, MAX_DOTS do dots[i].Transparency = 1 end
+        return
+    end
+
+    local isAiming = holeData.BallInRest and not holeData.WaitingForServer and holeData.HoleActive
+    if not isAiming then
+        for i = 1, MAX_DOTS do dots[i].Transparency = 1 end
+        return
+    end
+
+    local startPos = globalData.Ball.Position
+    local vel = GetVelocity(holeData.CurrentPower, holeData.CurrentAngle, holeData.Putting)
+    local currentPos = startPos
+    local currentVel = vel
+    local dt = 1/60
+    local GRAVITY = Vector3.new(0, -80, 0)
+    local rayParams = RaycastParams.new()
+    rayParams.FilterType = Enum.RaycastFilterType.Exclude
+    rayParams.FilterDescendantsInstances = {workspace.Balls, workspace.Characters, PredictionFolder}
+
+    local bounceCount = 0
+    local maxBounces = 5
+    local stopIdx = MAX_DOTS
+
+    for i = 1, MAX_DOTS do
+        dots[i].Position = currentPos
+        dots[i].Transparency = 0.3
+        dots[i].Color = holeData.Putting and Color3.fromRGB(0, 255, 127) or Color3.fromRGB(255, 170, 0)
+
+        local stepVel = currentVel * dt + 0.5 * GRAVITY * dt * dt
+        local result = workspace:Raycast(currentPos, stepVel, rayParams)
+
+        if result then
+            local hitName = result.Instance.Name
+            if hitName == "End" or hitName == "Sand" or hitName == "Water" or hitName == "OutOfBounds" then
+                if hitName ~= "End" then dots[i].Color = Color3.fromRGB(255, 0, 0) end
+                stopIdx = i
+                break
+            end
+            if bounceCount < maxBounces then
+                bounceCount += 1
+                local normal = result.Normal
+                local restitution = (hitName == "Green") and 0.316 or 0.58
+                local vn = currentVel:Dot(normal) * normal
+                local vt = currentVel - vn
+                currentVel = vt * 0.7 - vn * restitution
+                currentVel = Vector3.new(currentVel.X, currentVel.Y, 0)
+                currentPos = result.Position + normal * 0.02
+            else
+                stopIdx = i
+                break
+            end
+        else
+            currentPos += stepVel
+            currentVel += GRAVITY * dt
+        end
+    end
+
+    for i = stopIdx + 1, MAX_DOTS do
+        dots[i].Transparency = 1
+    end
+end
+
+RunService.Heartbeat:Connect(function()
+    if not DataModule then return end
+
+    local globalData = DataModule.GlobalData
+    local holeData = DataModule.CurrentHoleData
+    local ball = globalData and globalData.Ball
+
+    if Config.MaxPower and holeData then
+        if holeData.BallInRest and holeData.HoleActive and holeData.CurrentPower and holeData.CurrentPower > 0 then
+            holeData.CurrentPower = 100
+        end
+    end
+
+    if Config.BallControl and ball then
+        workspace.CurrentCamera.CameraSubject = ball
+        ball.AssemblyLinearVelocity = Vector3.new(0,0,0)
+        ball.AssemblyAngularVelocity = Vector3.new(0,0,0)
+        ball.Anchored = false
+
+        local moveDir = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.Up)    then moveDir += Vector3.new(0,1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Down)  then moveDir += Vector3.new(0,-1,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Left)  then moveDir += Vector3.new(-1,0,0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Right) then moveDir += Vector3.new(1,0,0) end
+
+        if moveDir.Magnitude > 0 then
+            ball.CFrame = ball.CFrame + (moveDir.Unit * Config.ControlSpeed)
+        end
+        ball.CFrame = CFrame.new(ball.Position.X, ball.Position.Y, 0)
+    end
+
+    if Config.TeleportEnabled and ball then
+        local LoadedMap = workspace:FindFirstChild("LoadedMap")
+        if LoadedMap then
+            local Map = LoadedMap:FindFirstChildOfClass("Folder")
+            if Map then
+                local mainTiles = Map:FindFirstChild("Main Tiles")
+                if mainTiles then
+                    local holeFolder = mainTiles:FindFirstChild("Hole")
+                    if holeFolder then
+                        local holePart = holeFolder:FindFirstChild("Hole")
+                        if holePart then
+                            pcall(function()
+                                local target = holePart.CFrame
+                                if ball:IsA("Model") and ball.PrimaryPart then
+                                    ball:SetPrimaryPartCFrame(target)
+                                elseif ball:IsA("BasePart") then
+                                    ball.CFrame = target
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Space, false, game)
+        task.wait()
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Space, false, game)
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    pcall(UpdateTrajectory)
+end)
